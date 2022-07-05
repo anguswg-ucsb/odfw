@@ -533,12 +533,12 @@ monthly_flows <-
   )
 
 # Save RDS
-saveRDS(daily_flows, here::here("data", "flow", "hatchery_daily_flows.rds"))
-saveRDS(monthly_flows, here::here("data", "flow", "hatchery_monthly_flows.rds"))
+# saveRDS(daily_flows, here::here("data", "flow", "hatchery_daily_flows.rds"))
+# saveRDS(monthly_flows, here::here("data", "flow", "hatchery_monthly_flows.rds"))
 
 # Save CSV
-readr::write_csv(daily_flows, here::here("data", "flow", "hatchery_daily_flows.csv"))
-readr::write_csv(monthly_flows, here::here("data", "flow", "hatchery_monthly_flows.csv"))
+# readr::write_csv(daily_flows, here::here("data", "flow", "hatchery_daily_flows.csv"))
+# readr::write_csv(monthly_flows, here::here("data", "flow", "hatchery_monthly_flows.csv"))
 
 # *****************************************************************************************
 # *****************************************************************************************

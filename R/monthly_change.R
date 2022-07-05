@@ -10,6 +10,8 @@
 
 # % Reduction
 # Flow Change Factor = Historic - Future
+# Some of the hatcheries have more than one COMID associated with it, so can you add the COMIDs in a column?
+#   Also, can you calculate the average monthly change so that we have 1 set of 12 values for each comid? For these new average month values, keep the same output values you have already calculated (flow_change_factor & pct_flow_change).
 
 rm(list = ls())
 
@@ -22,6 +24,170 @@ library(dataRetrieval)
 
 basepath       <- "D:/odfw/climate_change"
 pt_path        <- "D:/odfw/shp/odfw_hatcheries.shp"
+
+# **********************************
+# ---- Hatchery flow processing ----
+# **********************************
+
+# Path to data
+hist_path        <- "D:/odfw/climate_change/Oregon_historical_flow_m3day_1915-2006.csv"
+future_path      <- "D:/odfw/climate_change/Oregon_2040_flow_m3day_1915-2006.csv"
+
+# upstream tributary network
+ut_network <- readRDS(here::here("data", "upstream_networks", "upstream_nhd_network.rds"))
+
+# Hatchery and comid dataframe. drop geometry
+hatch_comids <- 
+  ut_network %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(hatchery, comid)
+
+hist_path        <- "D:/odfw/climate_change/Oregon_historical_flow_m3day_1915-2006.csv"
+future_path      <- "D:/odfw/climate_change/Oregon_2040_flow_m3day_1915-2006.csv"
+
+historic <- data.table::fread(hist_path) %>%
+  tibble::tibble() %>% 
+  setNames(c(gsub("x", "", names(.)))) %>% 
+  pivot_longer(
+    cols      = c(`23719075`:`23923474`),
+    names_to  = "comid",
+    values_to = "historic_flow"
+  ) %>% 
+  janitor::clean_names() %>% 
+  dplyr::relocate(date, year, month, day, comid, historic_flow, units)
+
+future <- data.table::fread(future_path) %>%
+  tibble::tibble() %>% 
+  setNames(c(gsub("x", "", names(.)))) %>% 
+  pivot_longer(
+    cols      = c(`23719075`:`23923474`),
+    names_to  = "comid",
+    values_to = "future_flow"
+  ) %>% 
+  janitor::clean_names() %>% 
+  dplyr::relocate(date, year, month, day, comid, future_flow, units)
+
+# Join historic and future
+stream_flows <- 
+  historic %>% 
+  dplyr::left_join(
+    dplyr::select(future, date, comid, future_flow),
+    by = c("date", "comid")
+  ) %>% 
+  dplyr::relocate(date, year, month, day, comid, historic_flow, future_flow, units)
+
+# unique(ut_network$comid) %in% unique(stream_flows$comid)
+# unique(stream_flows$comid) %in% unique(ut_network$comid)
+
+# Hatchery names & comids
+hatch_comids <- 
+  ut_network %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::filter(comid %in% unique(stream_flows$comid)) %>% 
+  dplyr::select(comid, hatchery)
+
+# Join future and historic data 
+stream_flows <-
+  stream_flows %>% 
+  dplyr::left_join(
+    hatch_comids, 
+    by = "comid"
+  ) %>% 
+  dplyr::relocate(date, year, month, day, comid, hatchery, historic_flow, future_flow, units)
+
+# length(unique(stream_flows$date))
+
+# list column of comids for each hatchery
+comids_lst <-
+  hatch_comids %>% 
+  dplyr::group_by(hatchery) %>% 
+  dplyr::summarize(comids = list(comid)) %>% 
+  dplyr::ungroup()
+
+  # tidyr::nest()
+# daily flows
+daily_flows <- 
+  stream_flows %>% 
+  dplyr::group_by(hatchery, date) %>% 
+  dplyr::summarise(
+    historic_flow = mean(historic_flow, na.rm = T),
+    future_flow   = mean(future_flow, na.rm = T)
+  ) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    flow_change_factor = historic_flow - future_flow,
+    pct_flow_change    = round(flow_change_factor/historic_flow*100, 2)
+  )  %>% 
+  dplyr::left_join(
+    comids_lst, 
+    by = "hatchery"
+  )
+# monthly flows
+monthly_flows <- 
+  stream_flows %>% 
+  dplyr::group_by(hatchery, month, year) %>% 
+  dplyr::summarise(
+    historic_flow = mean(historic_flow, na.rm = T),
+    future_flow   = mean(future_flow, na.rm = T)
+  ) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    date = as.Date(paste0(year, "-", month, "-01"))
+  ) %>% 
+  dplyr::select(hatchery, date, historic_flow, future_flow) %>% 
+  # dplyr::select(hatchery, COMIDX, date, historic_flow, future_flow) %>% 
+  dplyr::mutate(
+    flow_change_factor = historic_flow - future_flow,
+    pct_flow_change    = round(flow_change_factor/historic_flow*100, 2)
+  ) %>% 
+  dplyr::left_join(
+    comids_lst, 
+    by = "hatchery"
+  )
+
+# Save RDS
+saveRDS(daily_flows, here::here("data", "flow", "hatchery_daily_flows.rds"))
+saveRDS(monthly_flows, here::here("data", "flow", "hatchery_monthly_flows.rds"))
+
+# Save CSV
+readr::write_csv(daily_flows, here::here("data", "flow", "hatchery_daily_flows.csv"))
+readr::write_csv(monthly_flows, here::here("data", "flow", "hatchery_monthly_flows.csv"))
+
+# ********************************
+# ---- Average Monthly Change ----
+# ********************************
+
+#   Also, can you calculate the average monthly change so that we have 1 set of 12 values for each comid? 
+# For these new average month values, keep the same output values you have already calculated (flow_change_factor & pct_flow_change).
+# average monthly flows
+avg_month_flows <-
+  stream_flows %>% 
+  dplyr::group_by(comid, month) %>% 
+  dplyr::summarise(
+    historic_flow = mean(historic_flow, na.rm = T),
+    future_flow   = mean(future_flow, na.rm = T)
+  ) %>% 
+  dplyr::ungroup() %>% 
+  # dplyr::select(hatchery, date, historic_flow, future_flow) %>% 
+  # dplyr::select(hatchery, COMIDX, date, historic_flow, future_flow) %>% 
+  dplyr::mutate(
+    flow_change_factor = historic_flow - future_flow,
+    pct_flow_change    = round(flow_change_factor/historic_flow*100, 2)
+  ) %>% 
+  dplyr::left_join(
+    hatch_comids,
+    by = "comid"
+  ) %>% 
+  dplyr::relocate(hatchery, comid, month)
+
+# Save RDS
+saveRDS(avg_month_flows, here::here("data", "flow", "avg_monthly_flows.rds"))
+
+# Save CSV
+readr::write_csv(avg_month_flows, here::here("data", "flow", "avg_monthly_flows.csv"))
+
+# *****************************************************************************************
+# *****************************************************************************************
 
 # upstream tributary network
 ut_network <- readRDS(here::here("data", "upstream_networks", "upstream_nhd_network.rds"))
