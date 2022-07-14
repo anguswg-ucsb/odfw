@@ -187,6 +187,115 @@ saveRDS(avg_month_flows, here::here("data", "flow", "avg_monthly_flows.rds"))
 readr::write_csv(avg_month_flows, here::here("data", "flow", "avg_monthly_flows.csv"))
 
 # *****************************************************************************************
+# ********************************
+# ---- Avg Monthly flow plots ----
+# ********************************
+
+# Avg Monthly flow
+avg_month_flows <- readRDS(here::here("data", "flow", "avg_monthly_flows.rds"))
+
+# upstream tributary network
+ut_network <- readRDS(here::here("data", "upstream_networks", "upstream_nhd_network.rds"))
+
+# tmp <- ut_network %>% 
+#   dplyr::filter(comid == 23923474)
+# tmp2 <- ut_network %>% 
+#   dplyr::filter(comid == 23923430)
+# mapview::mapview(tmp, color = "red") + mapview::mapview(tmp2, color = "green") + ut_network
+# Unique COMIDs
+ucoms <- unique(avg_month_flows$comid)
+
+stream <- data.frame(
+  comid       = c(ucoms),
+  stream_name = c("Deschutes River",        "Oak Springs Creek", "McKenzie River", 
+                  "North Fork Alsea River", "North Umpqua River", "Rock Creek", 
+                  "Ferry Creek (upstream)", "Ferry Creek (downstream)", "Geiger Creek",
+                  "Rogue River", "Rogue River (above Lost Creek Lake)")
+  )
+
+avg_flows <- 
+  avg_month_flows %>%
+  dplyr::left_join(
+    stream, 
+    by = "comid"
+  ) %>% 
+  dplyr::group_by(comid) %>% 
+  dplyr::mutate(
+    # date       = as.Date(paste0("2020-", month, "-01")),
+    date       = strptime(paste0("2020-", month, "-01"), format="%Y-%m-%d"),
+    month_name = factor(month.abb, levels = c(month.abb), ordered = T)
+  ) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::group_by(comid) %>% 
+  dplyr::rename("Historical Flow" = historic_flow, "Future Projected Flow (2045)" = future_flow) %>%
+  tidyr::pivot_longer(cols = c( "Future Projected Flow (2045)", "Historical Flow")) %>% 
+  dplyr::mutate(
+    name = factor(name, levels = c("Historical Flow", "Future Projected Flow (2045)"))
+    ) %>% 
+  dplyr::ungroup()
+
+# Unique COMIDs
+ucoms <- unique(avg_flows$comid)
+
+# rm(i, flows, avg_flow_plot)
+# i <- 2
+# library(scales)
+for (i in 1:length(ucoms)) {
+  
+  flows <- 
+    avg_flows %>% 
+    dplyr::filter(comid == ucoms[i]) %>%
+    dplyr::mutate(value = value/1000)
+
+  max_lim <- ceiling(max(flows$value))
+  
+  logger::log_info("\n\n{i} / {length(ucoms)}\nCOMID: {ucoms[i]}\nHatchery: {flows$hatchery[1]}\nStream: {flows$stream_name[1]}")
+  
+  avg_flow_plot <-
+    ggplot() +
+    geom_line(data = flows, aes(x = date, y = value, color = name), size = 2) + 
+    scale_x_datetime(labels = scales::date_format("%b"), breaks = "1 month") +
+    # scale_y_continuous(labels = scales::comma) +
+    labs(
+      title = paste0(flows$hatchery[1], " - ", flows$stream_name[1]),
+      color = "",
+      x = "", 
+      y = "Flow (Thousand m3)"
+    ) +
+    # scale_y_continuous(labels = scales::comma) +
+    scale_y_continuous(limits = c(0, max_lim), labels = scales::comma) +
+    # ggthemes::theme_gdocs() +
+    theme_bw() +
+    theme(
+      plot.title = element_text(size = 18, hjust = 0.5),
+      legend.position    = "bottom",
+      legend.text = element_text(size = 12),
+      panel.grid.minor.x = element_blank(),
+      axis.text          = element_text(size = 12),
+      axis.title.y = element_text(size = 12,
+                                  margin = margin(t = 0, r = 15, b = 0, l = 0))
+    ) 
+  
+  ggsave(
+    paste0("img/avg_month_flows_", 
+           gsub(" ", "_", tolower(flows$hatchery[1])), 
+           "_",
+           ucoms[i], 
+           ".png"),
+    avg_flow_plot,
+    height = 8,
+    width  = 12
+    )
+}
+avg_flows
+avg_flows$month_name
+
+# avg_flows %>% 
+#   dplyr::group_by(comid) %>% 
+#   tidyr::pivot_longer(cols = c(historic_flow, future_flow)) %>% 
+#   dplyr::ungroup()
+
+# *****************************************************************************************
 # *****************************************************************************************
 
 # upstream tributary network
